@@ -1,5 +1,233 @@
 # Changes
 
+## 2026-02-26 (Portfolio finishing docs: model report + case study)
+
+Summary of change:
+- Added `docs/model_report.md` with:
+  - before/after model comparison table,
+  - segment highlights,
+  - explicit decision/tradeoff case study,
+  - reproducible commands for rerunning comparisons.
+- Linked the model report from README navigation/content.
+
+Affected files:
+- `docs/model_report.md`
+- `README.md`
+- `docs/changes.md`
+
+Migration notes:
+- Documentation-only update.
+- No runtime behavior changed.
+
+Validation status:
+- `conda run -n swiss-rental ./scripts/gate.sh` (pass).
+
+## 2026-02-26 (Portfolio polish: data-quality gate + demo UX + productionization rationale)
+
+Summary of change:
+- Added a dedicated data-quality reporting/validation script and integrated it into the local/CI gate flow.
+- Improved Streamlit demo UX with:
+  - sidebar model metadata (including model version),
+  - manifest verification status,
+  - sample scenario presets,
+  - clearer prediction outputs (monthly + annual rent metrics).
+- Added a `Productionization Decisions` section in README explaining key architecture/ops tradeoffs.
+
+Affected files:
+- `scripts/data_quality_report.py`
+- `scripts/gate.sh`
+- `app.py`
+- `README.md`
+- `docs/changes.md`
+
+Migration notes:
+- `./scripts/gate.sh` now includes a data-quality step that writes `models/data_quality_report.json`.
+- Gate can fail on critical data-quality issues (schema/range checks), improving reliability signal.
+
+Validation status:
+- `conda run -n swiss-rental ./scripts/gate.sh` (pass).
+
+## 2026-02-26 (Model quality upgrade: leakage-resistant encoding + derived features + split strategy)
+
+Summary of change:
+- Switched high-cardinality ZIP encoding from plain target encoding to leakage-resistant `CatBoostEncoder`.
+- Added derived features in shared pipeline:
+  - `area_per_room`
+  - `log_area_m2`
+  - `tax_distance_interaction`
+  - `is_top_floor_proxy`
+- Added configurable split strategy support across training/evaluation:
+  - `random`
+  - `group_zip` (group-based holdout by ZIP)
+- Updated tests for derived features and ZIP-group split behavior.
+- Updated README commands/docs to include split strategy usage.
+
+Affected files:
+- `src/ml_pipeline.py`
+- `scripts/train.py`
+- `scripts/evaluate.py`
+- `tests/test_ml_pipeline.py`
+- `README.md`
+- `docs/changes.md`
+
+Migration notes:
+- New training runs now persist a `CatBoostEncoder` object in `models/zip_encoder.pkl`.
+- `scripts/train.py` and `scripts/evaluate.py` now accept `--split-strategy`.
+
+Validation status:
+- `conda run -n swiss-rental python -m unittest discover -s tests -p "test_*.py" -v` (pass, 12 tests).
+- `conda run -n swiss-rental ./scripts/gate.sh` (pass).
+- Quick benchmark on `random` split after retraining in temp outputs:
+  - previous artifact eval: MAE `347.02`, RMSE `748.05`, R2 `0.7856`
+  - upgraded pipeline retrain: MAE `334.99`, RMSE `730.67`, R2 `0.7954`
+
+## 2026-02-26 (Phase C+D completion: integrity, deployment, startup checks)
+
+Summary of change:
+- Completed Phase C metadata/interface alignment by standardizing model-version metadata in inference outputs.
+- Added model artifact manifest support (`models/model_manifest.json`) with checksum generation and validation.
+- Added startup integrity checks to Streamlit app and CLI paths using the manifest.
+- Added deployment healthcheck and container runtime entrypoint:
+  - `scripts/healthcheck.py`
+  - `scripts/entrypoint.sh`
+  - `Dockerfile`
+  - `.dockerignore`
+- Updated training flow to emit manifest output by default.
+- Updated README with manifest-aware commands and deployment instructions.
+
+Affected files:
+- `src/ml_pipeline.py`
+- `scripts/train.py`
+- `scripts/evaluate.py`
+- `scripts/predict.py`
+- `scripts/healthcheck.py`
+- `scripts/entrypoint.sh`
+- `app.py`
+- `models/model_manifest.json`
+- `Dockerfile`
+- `.dockerignore`
+- `README.md`
+- `tests/test_ml_pipeline.py`
+- `docs/changes.md`
+
+Migration notes:
+- `scripts/train.py` now writes `models/model_manifest.json` by default (`--manifest-out`).
+- `scripts/evaluate.py` and `scripts/predict.py` now accept `--manifest` and include model-version metadata in outputs.
+- App startup now validates artifact integrity against `models/model_manifest.json` and fails fast on mismatch/missing artifacts.
+
+Validation status:
+- Executed in `swiss-rental` env:
+  - `python -m unittest discover -s tests -p "test_*.py" -v` (pass, 10 tests)
+  - `./scripts/gate.sh` (pass)
+
+## 2026-02-26 (Phase C shared inference-prep refactor)
+
+Summary of change:
+- Added shared feature-column resolution utility to `src/ml_pipeline.py`.
+- Refactored `scripts/predict.py` to use shared feature-name resolution instead of local duplicate logic.
+- Refactored `scripts/evaluate.py` to use shared `transform_features_for_model` path for model-aligned inference features.
+- Updated Streamlit app resource loading to use shared feature-name resolution helper.
+- Added tests for feature-name resolver behavior (file-preferred and booster-fallback paths).
+
+Affected files:
+- `src/ml_pipeline.py`
+- `scripts/predict.py`
+- `scripts/evaluate.py`
+- `app.py`
+- `tests/test_ml_pipeline.py`
+- `docs/changes.md`
+
+Migration notes:
+- `scripts/evaluate.py` now accepts `--feature-columns` (default `models/feature_columns.json`) for consistent feature alignment.
+- If the feature-columns file is missing, evaluator/predictor can fall back to model booster feature names when available.
+
+Validation status:
+- Verified by local compile + tests + gate in `swiss-rental` environment.
+
+## 2026-02-26 (Gate robustness for optional app dependency)
+
+Summary of change:
+- Updated `scripts/gate.sh` typecheck import smoke to treat Streamlit app import as optional when `streamlit` is not installed.
+- Kept core module imports (`src.ml_pipeline`, `scripts.train`, `scripts.evaluate`, `scripts.predict`) strict.
+
+Affected files:
+- `scripts/gate.sh`
+- `docs/changes.md`
+
+Migration notes:
+- In environments without `streamlit`, gate now skips importing `app.py` during typecheck smoke and continues with core checks.
+- App runtime still requires `streamlit`.
+
+Validation status:
+- `./scripts/gate.sh`: typecheck now passes core imports and reports app import skip when `streamlit` is missing.
+- Gate may still fail later on required dependencies missing for tests (for example `numpy`).
+
+## 2026-02-26 (Phase B metadata + segmented evaluation)
+
+Summary of change:
+- Added deterministic dataframe fingerprint helper and feature-columns checksum support.
+- Extended training metrics output with dataset fingerprint and feature columns SHA256.
+- Extended evaluation output with segmented metrics by canton, subtype, and rent band.
+- Added unit coverage for fingerprint stability and segmented metrics utilities.
+
+Affected files:
+- `src/ml_pipeline.py`
+- `scripts/train.py`
+- `scripts/evaluate.py`
+- `tests/test_ml_pipeline.py`
+- `docs/changes.md`
+
+Migration notes:
+- `models/training_metrics.json` now includes `data_fingerprint` and `feature_columns_sha256`.
+- `scripts/evaluate.py --metrics-out ...` now writes `segment_metrics`.
+
+Validation status:
+- Pending in current shell due to missing dependencies (`numpy`, `streamlit`) in active environment.
+
+## 2026-02-26 (Phase A contracts implementation)
+
+Summary of change:
+- Implemented strict shared input contracts in `src/ml_pipeline.py` for training and prediction paths.
+- Added required-column, non-null, and numeric-type validations with actionable error messages.
+- Wired contract enforcement into all script entry points (`train`, `evaluate`, `predict`) with fail-fast CLI errors.
+- Updated Streamlit app inference path to use shared transform/predict utilities and display contract errors to users.
+- Expanded unit tests to cover contract validation pass/fail scenarios.
+
+Affected files:
+- `src/ml_pipeline.py`
+- `scripts/train.py`
+- `scripts/evaluate.py`
+- `scripts/predict.py`
+- `app.py`
+- `tests/test_ml_pipeline.py`
+- `docs/changes.md`
+
+Migration notes:
+- Batch/app inference now expects full raw preprocessing columns and strictly validates input contract.
+- Training/evaluation now fail early if featured data violates required schema/typing assumptions.
+
+Validation status:
+- `python -m unittest discover -s tests -p "test_*.py" -v`: blocked in active shell (`ModuleNotFoundError: numpy`).
+- `./scripts/gate.sh`: blocked in active shell (`ModuleNotFoundError: streamlit` during import smoke).
+
+## 2026-02-26 (Roadmap planning document)
+
+Summary of change:
+- Added a decision-complete roadmap document describing the full repository upgrade path from portfolio-grade to production-ready.
+- Defined phase-based (non-time-bound) execution with explicit exit criteria, contract/interface additions, testing strategy, rollout/rollback, and risk mitigations.
+
+Affected files:
+- `docs/roadmap.md`
+- `docs/changes.md`
+
+Migration notes:
+- No runtime behavior change in this commit.
+- This is a planning/documentation addition to guide subsequent implementation work.
+
+Validation status:
+- Documentation-only update.
+- Local gate execution currently blocked in active shell environment due to missing runtime dependency (`streamlit`) during import smoke.
+
 ## 2026-02-08
 
 Summary of change:

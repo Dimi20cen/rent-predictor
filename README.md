@@ -11,7 +11,10 @@ Swiss rental price prediction project with:
 - [Dataset](#dataset)
 - [Replicate Locally](#replicate-locally)
 - [CLI Workflow](#cli-workflow)
+- [Deployment](#deployment)
 - [Quality Checks](#quality-checks)
+- [Model Report](#model-report)
+- [Productionization Decisions](#productionization-decisions)
 - [Notebooks](#notebook-flow)
 - [Project Structure](#project-structure)
 - [Notes](#notes)
@@ -78,7 +81,9 @@ python scripts/train.py \
   --model-out models/xgb_rent_model.pkl \
   --encoder-out models/zip_encoder.pkl \
   --metrics-out models/training_metrics.json \
-  --feature-columns-out models/feature_columns.json
+  --feature-columns-out models/feature_columns.json \
+  --manifest-out models/model_manifest.json \
+  --split-strategy random
 ```
 
 ### 3) Evaluate saved artifacts
@@ -88,7 +93,9 @@ python scripts/evaluate.py \
   --data data/processed/02_featured_data.pkl \
   --model models/xgb_rent_model.pkl \
   --encoder models/zip_encoder.pkl \
-  --metrics-out models/evaluation_metrics.json
+  --manifest models/model_manifest.json \
+  --metrics-out models/evaluation_metrics.json \
+  --split-strategy random
 ```
 
 ### 4) (Optional) Batch prediction
@@ -99,14 +106,34 @@ python scripts/predict.py \
   --output-csv predictions.csv \
   --model models/xgb_rent_model.pkl \
   --encoder models/zip_encoder.pkl \
+  --manifest models/model_manifest.json \
   --feature-columns models/feature_columns.json
 ```
 
 ## CLI Workflow
 
 - `scripts/train.py`: trains model + encoder and writes training metrics/feature columns.
-- `scripts/evaluate.py`: evaluates saved model/encoder on deterministic split.
-- `scripts/predict.py`: batch inference from input CSV.
+- `scripts/evaluate.py`: evaluates saved model/encoder on deterministic split (+ segmented metrics).
+- `scripts/predict.py`: batch inference from input CSV with `predicted_rent_chf`, `model_version`, and validation warning fields.
+- `scripts/healthcheck.py`: validates model artifact integrity from `models/model_manifest.json`.
+
+Validation split strategies:
+- `--split-strategy random`: standard random holdout.
+- `--split-strategy group_zip`: group-based holdout by ZIP (harder, more realistic generalization check).
+
+## Deployment
+
+Containerized deployment is supported with startup artifact checks:
+
+```bash
+docker build -t rentpredictor .
+docker run --rm -p 8501:8501 rentpredictor
+```
+
+At container startup:
+- `scripts/entrypoint.sh` runs `scripts/healthcheck.py`
+- healthcheck verifies checksums in `models/model_manifest.json`
+- Streamlit starts only if artifacts are valid
 
 ## Quality Checks
 
@@ -124,6 +151,41 @@ Run full local gate:
 
 CI:
 - GitHub Actions gate workflow: `.github/workflows/gate.yml`
+
+Data quality:
+- `scripts/data_quality_report.py` runs in `./scripts/gate.sh` and writes `models/data_quality_report.json`.
+- Gate fails if critical schema checks fail or configured out-of-range ratios are exceeded.
+
+## Productionization Decisions
+
+- Script-first pipeline over notebook-only execution:
+  - Decision: `scripts/train.py`, `scripts/evaluate.py`, `scripts/predict.py` are canonical.
+  - Why: reproducible runs, easier CI integration, lower handoff friction.
+
+- Contract-first input validation:
+  - Decision: strict shared schema checks in `src/ml_pipeline.py`.
+  - Why: fail fast on bad inputs and avoid silent inference/training corruption.
+
+- Explicit artifact integrity and versioning:
+  - Decision: `models/model_manifest.json` with checksum verification at startup/inference.
+  - Why: prevents stale/tampered artifact mixes and improves deploy safety.
+
+- Feature alignment as a first-class artifact:
+  - Decision: persist `models/feature_columns.json` and always align inference features.
+  - Why: removes train/serve mismatch risk from one-hot columns.
+
+- Two evaluation split modes:
+  - Decision: support `random` and `group_zip` split strategies.
+  - Why: report both optimistic baseline and harder generalization-to-unseen-ZIP behavior.
+
+- Deployment startup guardrails:
+  - Decision: healthcheck before app start (`scripts/entrypoint.sh` + `scripts/healthcheck.py`).
+  - Why: fail early if deployment artifacts are inconsistent.
+
+## Model Report
+
+- Detailed before/after metrics and tradeoff case study:
+  - `docs/model_report.md`
 
 ## Notebook Flow
 
@@ -155,3 +217,4 @@ RentPredictor/
 
 - Batch prediction input must include raw preprocessing columns, including `Zip`, `Canton`, and `SubType`.
 - `models/feature_columns.json` is required for robust feature alignment in app/CLI inference.
+- `models/model_manifest.json` is used for artifact integrity validation and model version metadata.
