@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import pickle
 import sys
 from pathlib import Path
@@ -15,7 +14,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ml_pipeline import transform_features_for_model, predict_rent
+from src.ml_pipeline import (
+    ArtifactValidationError,
+    ContractValidationError,
+    get_model_version,
+    predict_rent,
+    resolve_feature_names,
+    transform_features_for_model,
+    validate_model_artifacts,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,6 +36,7 @@ def parse_args() -> argparse.Namespace:
         default="models/feature_columns.json",
         help="Path to JSON list of training feature column names.",
     )
+    parser.add_argument("--manifest", default="models/model_manifest.json", help="Path to model manifest JSON.")
     return parser.parse_args()
 
 
@@ -39,28 +47,34 @@ def main() -> None:
         model = pickle.load(f)
     with open(args.encoder, "rb") as f:
         encoder = pickle.load(f)
+    input_validation_warnings: list[str] = []
+    try:
+        if Path(args.manifest).exists():
+            validate_model_artifacts(args.manifest)
+        else:
+            input_validation_warnings.append(f"manifest_missing:{args.manifest}")
+    except ArtifactValidationError as exc:
+        raise SystemExit(f"Artifact integrity error: {exc}") from exc
 
-    feature_names: list[str]
-    cols_path = Path(args.feature_columns)
-    if cols_path.exists():
-        feature_names = json.loads(cols_path.read_text(encoding="utf-8"))
-    else:
-        booster_names = model.get_booster().feature_names
-        if booster_names is None:
-            raise ValueError(
-                "Feature names unavailable. Run scripts/train.py to generate "
-                "models/feature_columns.json or pass --feature-columns."
-            )
-        feature_names = list(booster_names)
+    feature_names = resolve_feature_names(model, args.feature_columns)
     raw = pd.read_csv(args.input_csv)
-    x = transform_features_for_model(raw, encoder, feature_names)
+    try:
+        x = transform_features_for_model(raw, encoder, feature_names)
+    except ContractValidationError as exc:
+        raise SystemExit(f"Input contract error: {exc}") from exc
+
     pred = predict_rent(model, x)
 
     out = raw.copy()
     out["predicted_rent_chf"] = pred
+    out["model_version"] = get_model_version(args.manifest)
+    out["input_validation_warnings"] = ";".join(input_validation_warnings)
     out.to_csv(args.output_csv, index=False)
 
     print(f"Predictions complete: {len(out)} rows")
+    print(f"Model version: {get_model_version(args.manifest)}")
+    if input_validation_warnings:
+        print(f"Input validation warnings: {', '.join(input_validation_warnings)}")
     print(f"Saved: {args.output_csv}")
 
 

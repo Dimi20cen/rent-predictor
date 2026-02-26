@@ -1,0 +1,25 @@
+{
+  "model_version": "20260226160835",
+  "created_at_utc": "2026-02-26T16:08:35.172119+00:00",
+  "artifacts": {
+    "model": {
+      "path": "models/xgb_rent_model.pkl",
+      "sha256": "f99240ccf81523b67985493f64d4e4b9b6ba04800207cbc97c9bfe5fc749ad40"
+    },
+    "encoder": {
+      "path": "models/zip_encoder.pkl",
+      "sha256": "768394cfaa5d0b8140b879a7cb8c5e8d9b74d0cc1e0159a9eb69b5dbafadd991"
+    },
+    "feature_columns": {
+      "path": "models/feature_columns.json",
+      "sha256": "e784320a0f7d2f22352599feec03893fcc83e3d08433f2b4917d745138ee2df9"
+    },
+    "training_metrics": {
+      "path": "models/training_metrics.json",
+      "sha256": "c6f626775e9fa7d9d0d88c798f7d62ea447b9bc2f00bb7d41edeabda38eb2970"
+    }
+  },
+  "training": {
+    "data_path": "data/processed/02_featured_data.pkl"
+  }
+}

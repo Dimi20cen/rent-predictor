@@ -2,7 +2,16 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
-import json
+
+from src.ml_pipeline import (
+    ArtifactValidationError,
+    ContractValidationError,
+    get_model_version,
+    predict_rent,
+    resolve_feature_names,
+    transform_features_for_model,
+    validate_model_artifacts,
+)
 
 # Set Page Config
 st.set_page_config(page_title="Swiss Rent Predictor", layout="centered")
@@ -10,6 +19,8 @@ st.set_page_config(page_title="Swiss Rent Predictor", layout="centered")
 # --- 1. Load Resources ---
 @st.cache_resource
 def load_resources():
+    validate_model_artifacts("models/model_manifest.json")
+
     # Load Model
     with open('models/xgb_rent_model.pkl', 'rb') as f:
         model = pickle.load(f)
@@ -19,16 +30,23 @@ def load_resources():
         encoder = pickle.load(f)
 
     # Load feature columns used during training
-    with open('models/feature_columns.json', 'r', encoding='utf-8') as f:
-        feature_columns = json.load(f)
+    feature_columns = resolve_feature_names(model, "models/feature_columns.json")
         
     # Load Cleaned Data (for dropdown options only)
     # We only need unique Zips, Cantons, and Tax info
     df = pd.read_pickle('data/processed/02_featured_data.pkl')
     
-    return model, encoder, feature_columns, df
+    model_version = get_model_version("models/model_manifest.json")
+    return model, encoder, feature_columns, df, model_version
 
-model, encoder_zip, model_feature_names, df_ref = load_resources()
+try:
+    model, encoder_zip, model_feature_names, df_ref, model_version = load_resources()
+except ArtifactValidationError as exc:
+    st.error(f"Artifact integrity error: {exc}")
+    st.stop()
+except FileNotFoundError as exc:
+    st.error(f"Missing required artifact: {exc}")
+    st.stop()
 
 # --- 2. Helper Functions (Recreating NB 02 Logic) ---
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -51,32 +69,86 @@ HUBS = {
 # --- 3. UI Layout ---
 st.title("🇨🇭 Swiss Rental Price Predictor")
 st.markdown("Estimate the fair market value of an apartment in Switzerland using Machine Learning (XGBoost).")
+st.caption("Demo includes artifact integrity checks and displays the active model version.")
+
+SCENARIOS = {
+    "Custom": {},
+    "Zurich Starter Flat": {
+        "area": 58,
+        "rooms": 2.0,
+        "floor": 3,
+        "canton": "ZH",
+        "subtype": "FLAT",
+        "has_lake": False,
+        "is_new": False,
+        "is_quiet": True,
+    },
+    "Geneva Family Apartment": {
+        "area": 110,
+        "rooms": 4.5,
+        "floor": 4,
+        "canton": "GE",
+        "subtype": "FLAT",
+        "has_lake": False,
+        "is_new": True,
+        "is_quiet": True,
+    },
+    "Lakeside Premium": {
+        "area": 145,
+        "rooms": 5.0,
+        "floor": 6,
+        "canton": "ZG",
+        "subtype": "PENTHOUSE",
+        "has_lake": True,
+        "is_new": True,
+        "is_quiet": True,
+    },
+}
+
+with st.sidebar:
+    st.subheader("Model Metadata")
+    st.caption(f"Version: `{model_version}`")
+    st.success("Artifacts verified against manifest")
+    selected_scenario_name = st.selectbox("Sample Scenario", list(SCENARIOS.keys()), index=0)
+    st.caption("Pick a scenario for quick demo inputs, then fine-tune fields.")
+
+scenario = SCENARIOS[selected_scenario_name]
+default_area = int(scenario.get("area", 65))
+default_rooms = float(scenario.get("rooms", 2.5))
+default_floor = int(scenario.get("floor", 2))
+default_canton = str(scenario.get("canton", "ZH"))
+default_subtype = str(scenario.get("subtype", "FLAT"))
+default_has_lake = bool(scenario.get("has_lake", False))
+default_is_new = bool(scenario.get("is_new", False))
+default_is_quiet = bool(scenario.get("is_quiet", False))
 
 col1, col2 = st.columns(2)
 
 with col1:
-    area = st.number_input("Living Area (m²)", min_value=10, max_value=500, value=65)
-    rooms = st.number_input("Rooms", min_value=1.0, max_value=10.0, step=0.5, value=2.5)
-    floor = st.number_input("Floor", min_value=-1, max_value=20, value=2)
+    area = st.number_input("Living Area (m²)", min_value=10, max_value=500, value=default_area)
+    rooms = st.number_input("Rooms", min_value=1.0, max_value=10.0, step=0.5, value=default_rooms)
+    floor = st.number_input("Floor", min_value=-1, max_value=20, value=default_floor)
 
 with col2:
     # Canton Selection
     cantons = sorted(df_ref['Canton'].unique())
-    selected_canton = st.selectbox("Canton", cantons, index=cantons.index('ZH') if 'ZH' in cantons else 0)
+    canton_idx = cantons.index(default_canton) if default_canton in cantons else (cantons.index('ZH') if 'ZH' in cantons else 0)
+    selected_canton = st.selectbox("Canton", cantons, index=canton_idx)
     
     # Filter Zips by Canton
     canton_zips = sorted(df_ref[df_ref['Canton'] == selected_canton]['Zip'].unique())
-    selected_zip = st.selectbox("Zip Code", canton_zips)
+    selected_zip = st.selectbox("Zip Code", canton_zips, index=0)
     
     # SubType
     subtypes = sorted(df_ref['SubType'].unique())
-    selected_type = st.selectbox("Property Type", subtypes, index=subtypes.index('FLAT') if 'FLAT' in subtypes else 0)
+    subtype_idx = subtypes.index(default_subtype) if default_subtype in subtypes else (subtypes.index('FLAT') if 'FLAT' in subtypes else 0)
+    selected_type = st.selectbox("Property Type", subtypes, index=subtype_idx)
 
 st.markdown("### ✨ Extras")
 c1, c2, c3 = st.columns(3)
-with c1: has_lake = st.checkbox("Lake View")
-with c2: is_new = st.checkbox("New Building")
-with c3: is_quiet = st.checkbox("Quiet Area")
+with c1: has_lake = st.checkbox("Lake View", value=default_has_lake)
+with c2: is_new = st.checkbox("New Building", value=default_is_new)
+with c3: is_quiet = st.checkbox("Quiet Area", value=default_is_quiet)
 
 # --- 4. Prediction Logic ---
 if st.button("Predict Rent", type="primary"):
@@ -100,6 +172,8 @@ if st.button("Predict Rent", type="primary"):
         'Rooms': [rooms],
         'Area_m2': [area],
         'Floor': [floor],
+        'Canton': [selected_canton],
+        'SubType': [selected_type],
         'Lat': [lat],
         'Lon': [lon],
         'dist_to_Zurich_HB': [dists['dist_to_Zurich_HB']],
@@ -128,41 +202,25 @@ if st.button("Predict Rent", type="primary"):
         'is_sunny': [0],
         'Zip': [selected_zip] # For Encoder
     }
-    
-    X_input = pd.DataFrame(input_data)
-    
-    # D. Encoding
-    # 1. Target Encode Zip
-    X_input['Zip_encoded'] = encoder_zip.transform(X_input['Zip'])
-    X_input = X_input.drop(columns=['Zip'])
-    
-    # 2. One-Hot Encode (Manual to match training columns)
-    # We need to create the exact columns the model saw during training
-    # e.g., 'Canton_ZH', 'SubType_LOFT'
-    # Some XGBoost pickles do not preserve booster feature names.
-    # We load canonical feature names from models/feature_columns.json.
-    
-    # Create empty df with all model columns initialized to 0
-    X_final = pd.DataFrame(0, index=[0], columns=model_feature_names, dtype=float)
-    
-    # Fill in the numeric data we have
-    for col in X_input.columns:
-        if col in X_final.columns:
-            X_final[col] = X_input[col]
-            
-    # Set the One-Hot columns
-    canton_col = f"Canton_{selected_canton}"
-    if canton_col in X_final.columns:
-        X_final[canton_col] = 1
-        
-    subtype_col = f"SubType_{selected_type}"
-    if subtype_col in X_final.columns:
-        X_final[subtype_col] = 1
-        
-    # E. Predict
-    prediction_log = model.predict(X_final)[0]
-    prediction = np.expm1(prediction_log)
-    
-    # F. Display
-    st.success(f"### Estimated Rent: CHF {int(prediction):,}")
-    st.info(f"📍 Location: {selected_zip} (Tax Index: {tax_rate}) | 📏 Distance to Hub: {int(min_dist)} km")
+
+    try:
+        X_input = pd.DataFrame(input_data)
+        X_final = transform_features_for_model(X_input, encoder_zip, model_feature_names)
+        prediction = predict_rent(model, X_final)[0]
+    except ContractValidationError as exc:
+        st.error(f"Input contract error: {exc}")
+    except Exception as exc:
+        st.error(f"Prediction failed: {exc}")
+    else:
+        # F. Display
+        st.success("Prediction complete")
+        m1, m2 = st.columns(2)
+        with m1:
+            st.metric("Estimated Monthly Rent", f"CHF {int(prediction):,}")
+        with m2:
+            st.metric("Estimated Annual Rent", f"CHF {int(prediction * 12):,}")
+        st.info(
+            f"📍 Location: {selected_zip} (Tax Index: {tax_rate}) | "
+            f"📏 Distance to Hub: {int(min_dist)} km | "
+            f"🧩 Model Version: {model_version}"
+        )

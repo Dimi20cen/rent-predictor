@@ -9,17 +9,20 @@ import pickle
 import sys
 from pathlib import Path
 
-from sklearn.model_selection import train_test_split
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.ml_pipeline import (
+    build_model_manifest,
+    ContractValidationError,
+    dataframe_fingerprint,
     encode_train_test,
     load_featured_data,
     regression_metrics,
     save_json,
+    sha256_of_text,
+    split_train_test,
     split_features_target,
     train_xgb_log_target,
     predict_rent,
@@ -37,21 +40,37 @@ def parse_args() -> argparse.Namespace:
         default="models/feature_columns.json",
         help="Output path for model feature column names JSON.",
     )
+    parser.add_argument(
+        "--manifest-out",
+        default="models/model_manifest.json",
+        help="Output path for model manifest JSON.",
+    )
     parser.add_argument("--test-size", type=float, default=0.2, help="Holdout ratio.")
     parser.add_argument("--random-state", type=int, default=42, help="Random seed for split.")
+    parser.add_argument(
+        "--split-strategy",
+        choices=["random", "group_zip"],
+        default="random",
+        help="How to split train/test; group_zip avoids ZIP overlap leakage.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    df = load_featured_data(args.data)
-    x, y = split_features_target(df)
-    x_train_raw, x_test_raw, y_train, y_test = train_test_split(
+    try:
+        df = load_featured_data(args.data)
+        x, y = split_features_target(df)
+    except ContractValidationError as exc:
+        raise SystemExit(f"Input contract error: {exc}") from exc
+
+    x_train_raw, x_test_raw, y_train, y_test = split_train_test(
         x,
         y,
         test_size=args.test_size,
         random_state=args.random_state,
+        strategy=args.split_strategy,
     )
 
     x_train, x_test, encoder = encode_train_test(x_train_raw, x_test_raw, y_train)
@@ -68,21 +87,32 @@ def main() -> None:
         pickle.dump(model, f)
     with encoder_out.open("wb") as f:
         pickle.dump(encoder, f)
+    feature_columns = list(x_train.columns)
+    feature_columns_json = json.dumps(feature_columns, indent=2)
     Path(args.feature_columns_out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.feature_columns_out).write_text(json.dumps(list(x_train.columns), indent=2), encoding="utf-8")
+    Path(args.feature_columns_out).write_text(feature_columns_json, encoding="utf-8")
 
-    save_json(
-        args.metrics_out,
-        {
-            "data_path": args.data,
-            "random_state": args.random_state,
-            "test_size": args.test_size,
-            "train_rows": int(len(x_train)),
-            "test_rows": int(len(x_test)),
-            "feature_count": int(len(x_train.columns)),
-            "metrics": metrics,
-        },
+    training_payload = {
+        "data_path": args.data,
+        "data_fingerprint": dataframe_fingerprint(df),
+        "random_state": args.random_state,
+        "test_size": args.test_size,
+        "split_strategy": args.split_strategy,
+        "train_rows": int(len(x_train)),
+        "test_rows": int(len(x_test)),
+        "feature_count": int(len(x_train.columns)),
+        "feature_columns_sha256": sha256_of_text(feature_columns_json),
+        "metrics": metrics,
+    }
+    save_json(args.metrics_out, training_payload)
+    manifest_payload = build_model_manifest(
+        model_path=args.model_out,
+        encoder_path=args.encoder_out,
+        feature_columns_path=args.feature_columns_out,
+        metrics_path=args.metrics_out,
+        training_payload=training_payload,
     )
+    save_json(args.manifest_out, manifest_payload)
 
     print("Training complete")
     print(f"MAE:  {metrics['mae']:.2f} CHF")
@@ -92,6 +122,7 @@ def main() -> None:
     print(f"Saved encoder to: {args.encoder_out}")
     print(f"Saved columns to: {args.feature_columns_out}")
     print(f"Saved metrics to: {args.metrics_out}")
+    print(f"Saved manifest to: {args.manifest_out}")
 
 
 if __name__ == "__main__":
