@@ -123,7 +123,29 @@ Validation split strategies:
 
 ## Deployment
 
-Containerized deployment is supported with startup artifact checks:
+Containerized deployment is supported with startup artifact checks.
+
+### One-command VPS deploy
+
+From repo root on your VPS:
+
+```bash
+./scripts/deploy_vps.sh
+```
+
+This script will:
+- pull latest `origin/master` (fast-forward only)
+- rebuild the Docker image
+- replace the running `rentpredictor` container
+- print container status and recent logs
+
+Optional: skip `git pull` if you already synced code:
+
+```bash
+SKIP_PULL=1 ./scripts/deploy_vps.sh
+```
+
+### Manual Docker run
 
 ```bash
 docker build -t rentpredictor .
