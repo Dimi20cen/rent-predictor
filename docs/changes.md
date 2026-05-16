@@ -369,7 +369,7 @@ Validation status:
 Summary of change:
 - Rewrote README to be shorter and task-focused.
 - Added a high-level architecture diagram (Mermaid) showing train/evaluate/predict/app flow and artifacts.
-- Updated repository naming in README to `RentPredictor`.
+- Updated repository naming in README to `rent-predictor`.
 
 Affected files:
 - `README.md`
@@ -513,7 +513,7 @@ Validation status:
 ## 2026-02-08 (README live demo link)
 
 Summary of change:
-- Added live project demo link (`https://dimy.dev/projects/rentpredictor`) in README demo section.
+- Added live project demo link (`https://dimy.dev/projects/rent-predictor`) in README demo section.
 
 Affected files:
 - `README.md`

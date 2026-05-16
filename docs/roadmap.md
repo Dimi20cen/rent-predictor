@@ -1,7 +1,7 @@
-# RentPredictor Roadmap
+# rent-predictor Roadmap
 
 ## Objective
-Define a decision-complete, phase-based roadmap to evolve RentPredictor from portfolio-grade to production-ready ML deployment.
+Define a decision-complete, phase-based roadmap to evolve rent-predictor from portfolio-grade to production-ready ML deployment.
 
 ## Current State
 - Reproducible CLI scripts exist: `scripts/train.py`, `scripts/evaluate.py`, `scripts/predict.py`.

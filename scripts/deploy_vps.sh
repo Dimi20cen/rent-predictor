@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_NAME="rentpredictor"
-IMAGE="rentpredictor:latest"
+APP_NAME="rent-predictor"
+IMAGE="rent-predictor:latest"
 PORT_BIND="127.0.0.1:8501:8501"
 SKIP_PULL="${SKIP_PULL:-0}"
 

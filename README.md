@@ -1,4 +1,4 @@
-# RentPredictor
+# rent-predictor
 
 Swiss rental price prediction project with:
 - an XGBoost model,
@@ -31,7 +31,7 @@ These metrics come from the reproducible CLI pipeline (`train.py` / `evaluate.py
 
 ### Demo
 
-- Live demo: [https://dimy.dev/projects/rentpredictor](https://dimy.dev/projects/rentpredictor)
+- Live demo: [https://dimy.dev/projects/rent-predictor](https://dimy.dev/projects/rent-predictor)
 
 - Local interactive demo:
 
@@ -136,7 +136,7 @@ From repo root on your VPS:
 This script will:
 - pull latest `origin/master` (fast-forward only)
 - rebuild the Docker image
-- replace the running `rentpredictor` container
+- replace the running `rent-predictor` container
 - print container status and recent logs
 
 Optional: skip `git pull` if you already synced code:
@@ -148,8 +148,8 @@ SKIP_PULL=1 ./scripts/deploy_vps.sh
 ### Manual Docker run
 
 ```bash
-docker build -t rentpredictor .
-docker run --rm -p 8501:8501 rentpredictor
+docker build -t rent-predictor .
+docker run --rm -p 8501:8501 rent-predictor
 ```
 
 At container startup:
@@ -218,7 +218,7 @@ Data quality:
 ## Project Structure
 
 ```text
-RentPredictor/
+rent-predictor/
   app.py
   scripts/
     train.py

@@ -252,7 +252,7 @@ def build_prediction_payload(request_payload):
     }
 
 
-class RentPredictorRequestHandler(BaseHTTPRequestHandler):
+class RentPredictionRequestHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         if self.path == "/" or self.path == "/index.html":
             self.send_static_file(STATIC_ROOT / "index.html", head_only=True)
@@ -343,8 +343,8 @@ class RentPredictorRequestHandler(BaseHTTPRequestHandler):
 
 def main():
     port = int(os.environ.get("PORT", DEFAULT_PORT))
-    server = ThreadingHTTPServer(("0.0.0.0", port), RentPredictorRequestHandler)
-    print(f"RentPredictor web app running at http://127.0.0.1:{port}")
+    server = ThreadingHTTPServer(("0.0.0.0", port), RentPredictionRequestHandler)
+    print(f"rent-predictor web app running at http://127.0.0.1:{port}")
     server.serve_forever()
 
 
