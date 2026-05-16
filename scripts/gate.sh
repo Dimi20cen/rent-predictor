@@ -8,6 +8,7 @@ echo "[typecheck] lightweight import/type smoke"
 python - <<'PY'
 import importlib
 core_modules = [
+    "app",
     "src.ml_pipeline",
     "scripts.train",
     "scripts.evaluate",
@@ -17,11 +18,7 @@ core_modules = [
 for mod in core_modules:
     importlib.import_module(mod)
 
-if importlib.util.find_spec("streamlit") is None:
-    print("imports-ok (app import skipped: streamlit not installed)")
-else:
-    importlib.import_module("app")
-    print("imports-ok (including app)")
+print("imports-ok")
 PY
 
 echo "[test] unittest"

@@ -18,7 +18,7 @@ Date: 2026-02-08
 
 - Canonical reproducible ML path is script-driven (`train` -> `evaluate` -> `predict`).
 - Notebook flow remains available for exploration/analysis.
-- Inference is served through Streamlit (`app.py`) with pre-trained artifacts.
+- Inference is served through the lightweight web app (`app.py` API plus `static/` frontend) with pre-trained artifacts.
 - Feature generation includes:
   - geospatial hub distances,
   - tax enrichment (`tax_data_2025.csv` + city/commune mapping),

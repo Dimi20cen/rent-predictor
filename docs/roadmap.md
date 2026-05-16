@@ -5,7 +5,7 @@ Define a decision-complete, phase-based roadmap to evolve RentPredictor from por
 
 ## Current State
 - Reproducible CLI scripts exist: `scripts/train.py`, `scripts/evaluate.py`, `scripts/predict.py`.
-- Streamlit app exists: `app.py`.
+- Lightweight web app exists: `app.py` serves the API and `static/` contains the HTML/CSS/JS frontend.
 - Core artifacts exist: `models/xgb_rent_model.pkl`, `models/zip_encoder.pkl`, `models/feature_columns.json`.
 - Quality gate exists locally and in CI: `./scripts/gate.sh`, `.github/workflows/gate.yml`.
 - Main maturity gaps: artifact governance, strict contracts, deployment hardening, observability.
@@ -161,6 +161,6 @@ Roadmap execution is complete when:
 
 ## Assumptions and Defaults
 - No date-based milestones are used; completion is phase/exit-criteria based.
-- Streamlit remains a supported user interface.
+- The lightweight web app remains the supported user interface.
 - XGBoost remains the primary model family for this roadmap cycle.
 - `./scripts/gate.sh` remains the canonical local validation command.

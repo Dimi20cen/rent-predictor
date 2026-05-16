@@ -1,5 +1,34 @@
 # Changes
 
+## 2026-05-16 (Replace Streamlit with lightweight web app)
+
+Summary of change:
+- Replaced the Streamlit UI with a plain HTML/CSS/JS frontend served by `app.py`.
+- Added JSON endpoints for property options and rent prediction.
+- Kept the existing model artifacts, preprocessing, and prediction contract intact.
+- Removed Streamlit from runtime dependencies and updated startup commands.
+
+Affected files:
+- `app.py`
+- `static/index.html`
+- `static/styles.css`
+- `static/app.js`
+- `requirements.txt`
+- `environment.dev.yml`
+- `scripts/entrypoint.sh`
+- `scripts/gate.sh`
+- `README.md`
+- `docs/roadmap.md`
+- `docs/project-review.md`
+- `docs/changes.md`
+
+Migration notes:
+- No model, artifact, or data contract changes.
+- Local app command is now `python app.py`.
+
+Validation status:
+- `conda run -n swiss-rental ./scripts/gate.sh` (pass).
+
 ## 2026-02-26 (Portfolio finishing docs: model report + case study)
 
 Summary of change:

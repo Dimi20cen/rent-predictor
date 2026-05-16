@@ -3,7 +3,7 @@
 Swiss rental price prediction project with:
 - an XGBoost model,
 - reproducible train/evaluate/predict scripts,
-- and a Streamlit app for interactive inference.
+- and a lightweight HTML/CSS/JS web app for interactive inference.
 
 ## Navigation
 
@@ -36,7 +36,7 @@ These metrics come from the reproducible CLI pipeline (`train.py` / `evaluate.py
 - Local interactive demo:
 
 ```bash
-streamlit run app.py
+python app.py
 ```
 
 ## Dataset
@@ -71,7 +71,7 @@ conda env create -f environment.dev.yml
 conda activate swiss-rental
 ```
 
-For Streamlit Cloud deployment, `requirements.txt` is provided with runtime dependencies.
+For container/runtime deployment, `requirements.txt` is provided with runtime dependencies.
 
 ### 2) Train artifacts
 
@@ -155,7 +155,7 @@ docker run --rm -p 8501:8501 rentpredictor
 At container startup:
 - `scripts/entrypoint.sh` runs `scripts/healthcheck.py`
 - healthcheck verifies checksums in `models/model_manifest.json`
-- Streamlit starts only if artifacts are valid
+- the web app starts only if artifacts are valid
 
 ## Quality Checks
 

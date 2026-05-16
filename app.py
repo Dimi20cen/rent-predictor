@@ -1,7 +1,15 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
+from functools import lru_cache
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import mimetypes
+import os
+from pathlib import Path
 import pickle
+import sys
+
+import numpy as np
+import pandas as pd
 
 from src.ml_pipeline import (
     ArtifactValidationError,
@@ -13,214 +21,332 @@ from src.ml_pipeline import (
     validate_model_artifacts,
 )
 
-# Set Page Config
-st.set_page_config(page_title="Swiss Rent Predictor", layout="centered")
 
-# --- 1. Load Resources ---
-@st.cache_resource
-def load_resources():
-    validate_model_artifacts("models/model_manifest.json")
-
-    # Load Model
-    with open('models/xgb_rent_model.pkl', 'rb') as f:
-        model = pickle.load(f)
-    
-    # Load Zip Encoder
-    with open('models/zip_encoder.pkl', 'rb') as f:
-        encoder = pickle.load(f)
-
-    # Load feature columns used during training
-    feature_columns = resolve_feature_names(model, "models/feature_columns.json")
-        
-    # Load Cleaned Data (for dropdown options only)
-    # We only need unique Zips, Cantons, and Tax info
-    df = pd.read_pickle('data/processed/02_featured_data.pkl')
-    
-    model_version = get_model_version("models/model_manifest.json")
-    return model, encoder, feature_columns, df, model_version
-
-try:
-    model, encoder_zip, model_feature_names, df_ref, model_version = load_resources()
-except ArtifactValidationError as exc:
-    st.error(f"Artifact integrity error: {exc}")
-    st.stop()
-except FileNotFoundError as exc:
-    st.error(f"Missing required artifact: {exc}")
-    st.stop()
-
-# --- 2. Helper Functions (Recreating NB 02 Logic) ---
-def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 6371
-    phi1, phi2 = np.radians(lat1), np.radians(lat2)
-    dphi = np.radians(lat2 - lat1)
-    dlambda = np.radians(lon2 - lon1)
-    a = np.sin(dphi/2)**2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda/2)**2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-    return R * c
+PROJECT_ROOT = Path(__file__).resolve().parent
+STATIC_ROOT = PROJECT_ROOT / "static"
+DEFAULT_PORT = 8501
+AREA_MIN = 10
+AREA_MAX = 500
+ROOMS_MIN = 1.0
+ROOMS_MAX = 10.0
+FLOOR_MIN = -1
+FLOOR_MAX = 20
 
 HUBS = {
-    'Zurich_HB': (47.378177, 8.540192),
-    'Geneva_Cornavin': (46.210226, 6.142456),
-    'Basel_SBB': (47.547412, 7.589556),
-    'Bern_HB': (46.948833, 7.439122),
-    'Lausanne_Gare': (46.516777, 6.629095)
+    "Zurich_HB": (47.378177, 8.540192),
+    "Geneva_Cornavin": (46.210226, 6.142456),
+    "Basel_SBB": (47.547412, 7.589556),
+    "Bern_HB": (46.948833, 7.439122),
+    "Lausanne_Gare": (46.516777, 6.629095),
 }
 
-# --- 3. UI Layout ---
-st.title("🇨🇭 Swiss Rental Price Predictor")
-st.markdown("Estimate the fair market value of an apartment in Switzerland using Machine Learning (XGBoost).")
-st.caption("Demo includes artifact integrity checks and displays the active model version.")
 
-SCENARIOS = {
-    "Custom": {},
-    "Zurich Starter Flat": {
-        "area": 58,
-        "rooms": 2.0,
-        "floor": 3,
-        "canton": "ZH",
-        "subtype": "FLAT",
-        "has_lake": False,
-        "is_new": False,
-        "is_quiet": True,
-    },
-    "Geneva Family Apartment": {
-        "area": 110,
-        "rooms": 4.5,
-        "floor": 4,
-        "canton": "GE",
-        "subtype": "FLAT",
-        "has_lake": False,
-        "is_new": True,
-        "is_quiet": True,
-    },
-    "Lakeside Premium": {
-        "area": 145,
-        "rooms": 5.0,
-        "floor": 6,
-        "canton": "ZG",
-        "subtype": "PENTHOUSE",
-        "has_lake": True,
-        "is_new": True,
-        "is_quiet": True,
-    },
-}
+def haversine_distance(lat1, lon1, lat2, lon2):
+    earth_radius_km = 6371
+    lat1_radians = np.radians(lat1)
+    lat2_radians = np.radians(lat2)
+    lat_delta_radians = np.radians(lat2 - lat1)
+    lon_delta_radians = np.radians(lon2 - lon1)
+    haversine_value = (
+        np.sin(lat_delta_radians / 2) ** 2
+        + np.cos(lat1_radians) * np.cos(lat2_radians) * np.sin(lon_delta_radians / 2) ** 2
+    )
+    angular_distance = 2 * np.arctan2(np.sqrt(haversine_value), np.sqrt(1 - haversine_value))
+    return earth_radius_km * angular_distance
 
-with st.sidebar:
-    st.subheader("Model Metadata")
-    st.caption(f"Version: `{model_version}`")
-    st.success("Artifacts verified against manifest")
-    selected_scenario_name = st.selectbox("Sample Scenario", list(SCENARIOS.keys()), index=0)
-    st.caption("Pick a scenario for quick demo inputs, then fine-tune fields.")
 
-scenario = SCENARIOS[selected_scenario_name]
-default_area = int(scenario.get("area", 65))
-default_rooms = float(scenario.get("rooms", 2.5))
-default_floor = int(scenario.get("floor", 2))
-default_canton = str(scenario.get("canton", "ZH"))
-default_subtype = str(scenario.get("subtype", "FLAT"))
-default_has_lake = bool(scenario.get("has_lake", False))
-default_is_new = bool(scenario.get("is_new", False))
-default_is_quiet = bool(scenario.get("is_quiet", False))
+@lru_cache(maxsize=1)
+def load_resources():
+    validate_model_artifacts(PROJECT_ROOT / "models/model_manifest.json")
 
-col1, col2 = st.columns(2)
+    with open(PROJECT_ROOT / "models/xgb_rent_model.pkl", "rb") as model_file:
+        model = pickle.load(model_file)
 
-with col1:
-    area = st.number_input("Living Area (m²)", min_value=10, max_value=500, value=default_area)
-    rooms = st.number_input("Rooms", min_value=1.0, max_value=10.0, step=0.5, value=default_rooms)
-    floor = st.number_input("Floor", min_value=-1, max_value=20, value=default_floor)
+    with open(PROJECT_ROOT / "models/zip_encoder.pkl", "rb") as encoder_file:
+        encoder = pickle.load(encoder_file)
 
-with col2:
-    # Canton Selection
-    cantons = sorted(df_ref['Canton'].unique())
-    canton_idx = cantons.index(default_canton) if default_canton in cantons else (cantons.index('ZH') if 'ZH' in cantons else 0)
-    selected_canton = st.selectbox("Canton", cantons, index=canton_idx)
-    
-    # Filter Zips by Canton
-    canton_zips = sorted(df_ref[df_ref['Canton'] == selected_canton]['Zip'].unique())
-    selected_zip = st.selectbox("Zip Code", canton_zips, index=0)
-    
-    # SubType
-    subtypes = sorted(df_ref['SubType'].unique())
-    subtype_idx = subtypes.index(default_subtype) if default_subtype in subtypes else (subtypes.index('FLAT') if 'FLAT' in subtypes else 0)
-    selected_type = st.selectbox("Property Type", subtypes, index=subtype_idx)
+    feature_columns = resolve_feature_names(model, PROJECT_ROOT / "models/feature_columns.json")
+    reference_dataframe = pd.read_pickle(PROJECT_ROOT / "data/processed/02_featured_data.pkl")
+    model_version = get_model_version(PROJECT_ROOT / "models/model_manifest.json")
+    return model, encoder, feature_columns, reference_dataframe, model_version
 
-st.markdown("### ✨ Extras")
-c1, c2, c3 = st.columns(3)
-with c1: has_lake = st.checkbox("Lake View", value=default_has_lake)
-with c2: is_new = st.checkbox("New Building", value=default_is_new)
-with c3: is_quiet = st.checkbox("Quiet Area", value=default_is_quiet)
 
-# --- 4. Prediction Logic ---
-if st.button("Predict Rent", type="primary"):
-    
-    # A. Get Reference Data for the selected Zip
-    # We need Lat, Lon, and Tax Rate for the selected Zip
-    # We take the median Lat/Lon/Tax of existing listings in that Zip
-    ref_row = df_ref[df_ref['Zip'] == selected_zip].iloc[0]
-    lat, lon = ref_row['Lat'], ref_row['Lon']
-    tax_rate = ref_row['tax_rate']
-    
-    # B. Calculate Distances
-    dists = {}
-    for hub, coords in HUBS.items():
-        dists[f'dist_to_{hub}'] = haversine_distance(lat, lon, coords[0], coords[1])
-    min_dist = min(dists.values())
-    
-    # C. Construct Input DataFrame
-    # Must match the columns XGBoost expects (except One-Hot columns which we handle manually)
-    input_data = {
-        'Rooms': [rooms],
-        'Area_m2': [area],
-        'Floor': [floor],
-        'Canton': [selected_canton],
-        'SubType': [selected_type],
-        'Lat': [lat],
-        'Lon': [lon],
-        'dist_to_Zurich_HB': [dists['dist_to_Zurich_HB']],
-        'dist_to_Geneva_Cornavin': [dists['dist_to_Geneva_Cornavin']],
-        'dist_to_Basel_SBB': [dists['dist_to_Basel_SBB']],
-        'dist_to_Bern_HB': [dists['dist_to_Bern_HB']],
-        'dist_to_Lausanne_Gare': [dists['dist_to_Lausanne_Gare']],
-        'dist_to_closest_hub': [min_dist],
-        'tax_rate': [tax_rate],
-        'is_rent_estimated': [0], # User input is "real"
-        'year_built_is_missing': [1], # Assume unknown
-        'is_renovated': [1 if is_new else 0],
-        'Balcony': [1 if has_lake else 0], # Proxy
-        'Elevator': [1],
-        'Parking': [0],
-        'View': [1 if has_lake else 0],
-        'Fireplace': [0],
-        'Child_Friendly': [0],
-        'CableTV': [0],
-        'New_Building': [1 if is_new else 0],
-        'Minergie': [0],
-        'Wheelchair': [0],
-        'has_lake_view': [1 if has_lake else 0],
-        'is_attic': [0],
-        'is_quiet': [1 if is_quiet else 0],
-        'is_sunny': [0],
-        'Zip': [selected_zip] # For Encoder
+def get_options_payload():
+    _, _, _, reference_dataframe, model_version = load_resources()
+    cantons = sorted(str(canton) for canton in reference_dataframe["Canton"].dropna().unique())
+    subtypes = sorted(str(subtype) for subtype in reference_dataframe["SubType"].dropna().unique())
+    zip_codes_by_canton = {}
+
+    for canton in cantons:
+        canton_zip_codes = reference_dataframe.loc[reference_dataframe["Canton"] == canton, "Zip"].dropna().unique()
+        zip_codes_by_canton[canton] = sorted(int(zip_code) for zip_code in canton_zip_codes)
+
+    return {
+        "cantons": cantons,
+        "defaultCanton": "ZH" if "ZH" in cantons else cantons[0],
+        "defaultSubtype": "FLAT" if "FLAT" in subtypes else subtypes[0],
+        "subtypes": subtypes,
+        "zipCodesByCanton": zip_codes_by_canton,
+        "modelVersion": model_version,
     }
 
-    try:
-        X_input = pd.DataFrame(input_data)
-        X_final = transform_features_for_model(X_input, encoder_zip, model_feature_names)
-        prediction = predict_rent(model, X_final)[0]
-    except ContractValidationError as exc:
-        st.error(f"Input contract error: {exc}")
-    except Exception as exc:
-        st.error(f"Prediction failed: {exc}")
-    else:
-        # F. Display
-        st.success("Prediction complete")
-        m1, m2 = st.columns(2)
-        with m1:
-            st.metric("Estimated Monthly Rent", f"CHF {int(prediction):,}")
-        with m2:
-            st.metric("Estimated Annual Rent", f"CHF {int(prediction * 12):,}")
-        st.info(
-            f"📍 Location: {selected_zip} (Tax Index: {tax_rate}) | "
-            f"📏 Distance to Hub: {int(min_dist)} km | "
-            f"🧩 Model Version: {model_version}"
+
+def get_required_request_value(request_payload, field_name):
+    if field_name not in request_payload:
+        raise KeyError(field_name)
+    return request_payload[field_name]
+
+
+def parse_number_request_value(request_payload, field_name, display_name, minimum_value, maximum_value):
+    raw_value = get_required_request_value(request_payload, field_name)
+    if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+        raise ValueError(f"{display_name} must be a number.")
+
+    parsed_value = float(raw_value)
+    if not np.isfinite(parsed_value):
+        raise ValueError(f"{display_name} must be a finite number.")
+
+    if parsed_value < minimum_value or parsed_value > maximum_value:
+        raise ValueError(f"{display_name} must be between {minimum_value} and {maximum_value}.")
+
+    return parsed_value
+
+
+def parse_integer_request_value(request_payload, field_name, display_name, minimum_value, maximum_value):
+    parsed_value = parse_number_request_value(
+        request_payload,
+        field_name,
+        display_name,
+        minimum_value,
+        maximum_value,
+    )
+    if not parsed_value.is_integer():
+        raise ValueError(f"{display_name} must be a whole number.")
+
+    return int(parsed_value)
+
+
+def parse_boolean_request_value(request_payload, field_name, default_value=False):
+    raw_value = request_payload.get(field_name, default_value)
+    if not isinstance(raw_value, bool):
+        raise ValueError(f"{field_name} must be true or false.")
+    return raw_value
+
+
+def validate_prediction_request(request_payload, reference_dataframe):
+    if not isinstance(request_payload, dict):
+        raise ValueError("Request body must be a JSON object.")
+
+    cantons = set(str(canton) for canton in reference_dataframe["Canton"].dropna().unique())
+    subtypes = set(str(subtype) for subtype in reference_dataframe["SubType"].dropna().unique())
+
+    selected_canton = get_required_request_value(request_payload, "canton")
+    if not isinstance(selected_canton, str) or selected_canton not in cantons:
+        raise ValueError("Canton must be one of the available canton options.")
+
+    selected_property_type = get_required_request_value(request_payload, "propertyType")
+    if not isinstance(selected_property_type, str) or selected_property_type not in subtypes:
+        raise ValueError("Property type must be one of the available property type options.")
+
+    selected_zip = parse_integer_request_value(request_payload, "zipCode", "Zip code", 1000, 9999)
+    canton_zip_codes = reference_dataframe.loc[reference_dataframe["Canton"] == selected_canton, "Zip"].dropna().unique()
+    zip_codes_for_selected_canton = set(int(zip_code) for zip_code in canton_zip_codes)
+    if selected_zip not in zip_codes_for_selected_canton:
+        raise ValueError("Zip code must belong to the selected canton.")
+
+    return {
+        "area": parse_number_request_value(request_payload, "area", "Living area", AREA_MIN, AREA_MAX),
+        "rooms": parse_number_request_value(request_payload, "rooms", "Rooms", ROOMS_MIN, ROOMS_MAX),
+        "floor": parse_integer_request_value(request_payload, "floor", "Floor", FLOOR_MIN, FLOOR_MAX),
+        "canton": selected_canton,
+        "zipCode": selected_zip,
+        "propertyType": selected_property_type,
+        "hasLake": parse_boolean_request_value(request_payload, "hasLake"),
+        "isNew": parse_boolean_request_value(request_payload, "isNew"),
+        "isQuiet": parse_boolean_request_value(request_payload, "isQuiet"),
+    }
+
+
+def build_prediction_payload(request_payload):
+    model, encoder, model_feature_names, reference_dataframe, model_version = load_resources()
+    validated_request_payload = validate_prediction_request(request_payload, reference_dataframe)
+
+    selected_canton = validated_request_payload["canton"]
+    selected_property_type = validated_request_payload["propertyType"]
+    selected_zip = validated_request_payload["zipCode"]
+    area = validated_request_payload["area"]
+    rooms = validated_request_payload["rooms"]
+    floor = validated_request_payload["floor"]
+    has_lake = validated_request_payload["hasLake"]
+    is_new = validated_request_payload["isNew"]
+    is_quiet = validated_request_payload["isQuiet"]
+
+    matching_reference_rows = reference_dataframe[reference_dataframe["Zip"] == selected_zip]
+    if matching_reference_rows.empty:
+        raise ValueError(f"No reference data found for zip code {selected_zip}.")
+
+    reference_row = matching_reference_rows.iloc[0]
+    lat = reference_row["Lat"]
+    lon = reference_row["Lon"]
+    tax_rate = reference_row["tax_rate"]
+
+    distances_to_hubs = {}
+    for hub_name, hub_coordinates in HUBS.items():
+        distances_to_hubs[f"dist_to_{hub_name}"] = haversine_distance(
+            lat,
+            lon,
+            hub_coordinates[0],
+            hub_coordinates[1],
         )
+    minimum_distance_to_hub = min(distances_to_hubs.values())
+
+    input_data = {
+        "Rooms": [rooms],
+        "Area_m2": [area],
+        "Floor": [floor],
+        "Canton": [selected_canton],
+        "SubType": [selected_property_type],
+        "Lat": [lat],
+        "Lon": [lon],
+        "dist_to_Zurich_HB": [distances_to_hubs["dist_to_Zurich_HB"]],
+        "dist_to_Geneva_Cornavin": [distances_to_hubs["dist_to_Geneva_Cornavin"]],
+        "dist_to_Basel_SBB": [distances_to_hubs["dist_to_Basel_SBB"]],
+        "dist_to_Bern_HB": [distances_to_hubs["dist_to_Bern_HB"]],
+        "dist_to_Lausanne_Gare": [distances_to_hubs["dist_to_Lausanne_Gare"]],
+        "dist_to_closest_hub": [minimum_distance_to_hub],
+        "tax_rate": [tax_rate],
+        "is_rent_estimated": [0],
+        "year_built_is_missing": [1],
+        "is_renovated": [1 if is_new else 0],
+        "Balcony": [1 if has_lake else 0],
+        "Elevator": [1],
+        "Parking": [0],
+        "View": [1 if has_lake else 0],
+        "Fireplace": [0],
+        "Child_Friendly": [0],
+        "CableTV": [0],
+        "New_Building": [1 if is_new else 0],
+        "Minergie": [0],
+        "Wheelchair": [0],
+        "has_lake_view": [1 if has_lake else 0],
+        "is_attic": [0],
+        "is_quiet": [1 if is_quiet else 0],
+        "is_sunny": [0],
+        "Zip": [selected_zip],
+    }
+
+    prediction_input_dataframe = pd.DataFrame(input_data)
+    model_input_dataframe = transform_features_for_model(prediction_input_dataframe, encoder, model_feature_names)
+    monthly_rent = int(predict_rent(model, model_input_dataframe)[0])
+
+    return {
+        "monthlyRent": monthly_rent,
+        "annualRent": monthly_rent * 12,
+        "details": {
+            "zipCode": selected_zip,
+            "taxIndex": float(tax_rate),
+            "distanceToNearestHubKm": int(minimum_distance_to_hub),
+            "modelVersion": model_version,
+            "modelType": "XGBoost",
+        },
+    }
+
+
+class RentPredictorRequestHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        if self.path == "/" or self.path == "/index.html":
+            self.send_static_file(STATIC_ROOT / "index.html", head_only=True)
+            return
+
+        if self.path.startswith("/static/"):
+            requested_static_path = STATIC_ROOT / self.path.removeprefix("/static/")
+            self.send_static_file(requested_static_path, head_only=True)
+            return
+
+        self.send_error_response(HTTPStatus.NOT_FOUND, "Not found.")
+
+    def do_GET(self):
+        if self.path == "/" or self.path == "/index.html":
+            self.send_static_file(STATIC_ROOT / "index.html")
+            return
+
+        if self.path == "/api/options":
+            self.send_json_response(get_options_payload())
+            return
+
+        if self.path.startswith("/static/"):
+            requested_static_path = STATIC_ROOT / self.path.removeprefix("/static/")
+            self.send_static_file(requested_static_path)
+            return
+
+        self.send_error_response(HTTPStatus.NOT_FOUND, "Not found.")
+
+    def do_POST(self):
+        if self.path != "/api/predict":
+            self.send_error_response(HTTPStatus.NOT_FOUND, "Not found.")
+            return
+
+        try:
+            request_payload = self.read_json_body()
+            prediction_payload = build_prediction_payload(request_payload)
+        except KeyError as exc:
+            self.send_error_response(HTTPStatus.BAD_REQUEST, f"Missing required field: {exc.args[0]}.")
+        except (ValueError, json.JSONDecodeError) as exc:
+            self.send_error_response(HTTPStatus.BAD_REQUEST, str(exc))
+        except ContractValidationError as exc:
+            self.send_error_response(HTTPStatus.BAD_REQUEST, f"Input contract error: {exc}")
+        except ArtifactValidationError as exc:
+            self.send_error_response(HTTPStatus.INTERNAL_SERVER_ERROR, f"Artifact integrity error: {exc}")
+        except Exception as exc:
+            self.send_error_response(HTTPStatus.INTERNAL_SERVER_ERROR, f"Prediction failed: {exc}")
+        else:
+            self.send_json_response(prediction_payload)
+
+    def read_json_body(self):
+        content_length = int(self.headers.get("Content-Length", "0"))
+        request_body = self.rfile.read(content_length).decode("utf-8")
+        return json.loads(request_body)
+
+    def send_static_file(self, static_file_path, head_only=False):
+        resolved_static_file_path = static_file_path.resolve()
+        if not str(resolved_static_file_path).startswith(str(STATIC_ROOT.resolve())):
+            self.send_error_response(HTTPStatus.NOT_FOUND, "Not found.")
+            return
+
+        if not resolved_static_file_path.is_file():
+            self.send_error_response(HTTPStatus.NOT_FOUND, "Not found.")
+            return
+
+        response_body = resolved_static_file_path.read_bytes()
+        content_type = mimetypes.guess_type(resolved_static_file_path)[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(response_body)))
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(response_body)
+
+    def send_json_response(self, response_payload, status=HTTPStatus.OK):
+        response_body = json.dumps(response_payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response_body)))
+        self.end_headers()
+        self.wfile.write(response_body)
+
+    def send_error_response(self, status, message):
+        self.send_json_response({"error": message}, status=status)
+
+    def log_message(self, format, *args):
+        sys.stderr.write("%s - - [%s] %s\n" % (self.address_string(), self.log_date_time_string(), format % args))
+
+
+def main():
+    port = int(os.environ.get("PORT", DEFAULT_PORT))
+    server = ThreadingHTTPServer(("0.0.0.0", port), RentPredictorRequestHandler)
+    print(f"RentPredictor web app running at http://127.0.0.1:{port}")
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

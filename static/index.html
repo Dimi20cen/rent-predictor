@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Swiss Rent Estimator</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="estimate-card" aria-labelledby="page-title">
+        <header class="page-header">
+          <h1 id="page-title">Swiss Rent Estimator</h1>
+          <p>Fair monthly rent estimate for apartments in Switzerland.</p>
+        </header>
+
+        <form id="estimate-form" class="estimate-form">
+          <section aria-labelledby="property-details-heading">
+            <h2 id="property-details-heading">Property details</h2>
+            <div class="field-grid">
+              <label class="field">
+                <span>
+                  Living area <small>(m²)</small>
+                </span>
+                <input id="area" name="area" type="number" min="10" max="500" value="65" required>
+              </label>
+
+              <label class="field">
+                <span>Rooms</span>
+                <input id="rooms" name="rooms" type="number" min="1" max="10" step="0.5" value="2.5" required>
+              </label>
+
+              <label class="field">
+                <span>Floor</span>
+                <input id="floor" name="floor" type="number" min="-1" max="20" value="2" required>
+              </label>
+
+              <label class="field">
+                <span>Canton</span>
+                <select id="canton" name="canton" required></select>
+              </label>
+
+              <label class="field">
+                <span>Zip code</span>
+                <select id="zip-code" name="zipCode" required></select>
+              </label>
+
+              <label class="field">
+                <span>Property type</span>
+                <select id="property-type" name="propertyType" required></select>
+              </label>
+            </div>
+          </section>
+
+          <section aria-labelledby="features-heading">
+            <h2 id="features-heading">Amenities</h2>
+            <div class="feature-row">
+              <label class="check-field">
+                <input id="has-lake" name="hasLake" type="checkbox">
+                <span>Lake view</span>
+              </label>
+
+              <label class="check-field">
+                <input id="is-new" name="isNew" type="checkbox">
+                <span>New building</span>
+              </label>
+
+              <label class="check-field">
+                <input id="is-quiet" name="isQuiet" type="checkbox">
+                <span>Quiet area</span>
+              </label>
+            </div>
+          </section>
+
+          <button id="estimate-button" class="primary-button" type="submit">Estimate rent</button>
+        </form>
+
+        <section id="result-panel" class="result-panel" aria-live="polite" hidden>
+          <p class="result-label">Estimated rent</p>
+          <p id="monthly-rent" class="result-monthly"></p>
+          <p id="annual-rent" class="result-yearly"></p>
+        </section>
+
+        <p id="error-message" class="error-message" role="alert" hidden></p>
+
+        <details id="technical-details" class="technical-details" hidden>
+          <summary>Details</summary>
+          <dl>
+            <div>
+              <dt>Zip code</dt>
+              <dd id="detail-zip-code"></dd>
+            </div>
+            <div>
+              <dt>Tax index</dt>
+              <dd id="detail-tax-index"></dd>
+            </div>
+            <div>
+              <dt>Distance to nearest hub</dt>
+              <dd id="detail-distance"></dd>
+            </div>
+            <div>
+              <dt>Model version</dt>
+              <dd id="detail-model-version"></dd>
+            </div>
+            <div>
+              <dt>Model type</dt>
+              <dd id="detail-model-type"></dd>
+            </div>
+          </dl>
+        </details>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
